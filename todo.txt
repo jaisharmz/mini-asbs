@@ -1,0 +1,2 @@
+- The reference SDE is some pretrained diffusion model (e.g. generating images)
+- Energy function is some function like the Q function in RL
