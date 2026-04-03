@@ -18,3 +18,4 @@ class GMM2DEnergy:
         square_distance = torch.sum((x - means) ** 2, dim=-1)
         logprobs = -square_distance / (2 * self.var)
         energy = -torch.logsumexp(logprobs, dim=1)
+        return energy

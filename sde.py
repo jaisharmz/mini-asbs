@@ -30,8 +30,11 @@ class VESDE(BaseSDE):
         return torch.zeros_like(x)
     def diffusion(self, t):
         return self.sigma_min * (self.sigma_ratio ** (1 - t)) * ((2 * torch.log(torch.tensor(self.sigma_ratio))) ** 0.5)
-    # def marginal_prob(self, x0, t):
-    #     return x0, self.get_sigma(t)
+    def marginal_prob(self, x0, t):
+        mean = x0
+        var = self._diffsquare_integral(t)
+        std = torch.sqrt(var.clamp(min=0))
+        return mean, std
     def sample_posterior(self, t, x0, x1):
         """sample xt given x0 and x1"""
         t_adjusted = self._diffsquare_integral(t) / self.total_var

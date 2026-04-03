@@ -17,6 +17,8 @@ class MinimalMLP(nn.Module):
             nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(),
             nn.Linear(hidden_dim, x_dim)
         )
     def forward(self, t, x):
@@ -41,7 +43,7 @@ def train_minimal_asbs():
     optimizer = optim.Adam(adjoint_model.parameters(), lr=1e-3)
 
     batch_size = 512
-    epochs = 1000
+    epochs = 2000
     adjoint_model.train()
     print("[START TRAINING]")
     for epoch in range(epochs):
@@ -55,6 +57,7 @@ def train_minimal_asbs():
         if epoch % (epochs // 10) == 0:
             print(f"Epoch: {epoch} | Loss: {loss.item():.4f}")
     print("[END TRAINING]")
+    return adjoint_model, sde
 
 @torch.no_grad()
 def sample_and_plot(adjoint_model, sde):
@@ -75,7 +78,7 @@ def sample_and_plot(adjoint_model, sde):
     plt.xlim(-6, 6)
     plt.ylim(-6, 6)
     plt.grid(True)
-    plt.show()
+    plt.savefig("test.png")
 
 if __name__ == "__main__":
     model, sde = train_minimal_asbs()

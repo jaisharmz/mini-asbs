@@ -20,7 +20,7 @@ class AdjointMatcher:
         x1 = self.simulate(x0)
         x1.requires_grad_(True)
         energy = energy_fn(x1)
-        energy_grad = torch.autograd.grad(energy, x1)[0]
+        energy_grad = torch.autograd.grad(energy.sum(), x1)[0]
 
         t1 = torch.ones(x0.shape[0], 1, device=x0.device)
         with torch.no_grad():
