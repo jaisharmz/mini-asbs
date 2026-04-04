@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 
-from sde import VESDE
+from sde import VESDE, VPSDE
 from matcher import AdjointMatcher
 from energy import GMM2DEnergy
 
@@ -31,33 +31,45 @@ class ZeroCorrector(nn.Module):
     def forward(self, t, x):
         return torch.zeros_like(x)
 
-def train_minimal_asbs():
+def train_asbs():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    sde = VESDE()
+    sde = VPSDE()
     matcher = AdjointMatcher(sde, steps=500)
     energy_fn = GMM2DEnergy(device=device)
 
     adjoint_model = MinimalMLP().to(device)
-    corrector_model = ZeroCorrector().to(device)
+    corrector_model = MinimalMLP().to(device)
 
-    optimizer = optim.Adam(adjoint_model.parameters(), lr=1e-3)
+    optimizer_adjoint_model = optim.Adam(adjoint_model.parameters(), lr=1e-3)
+    optimizer_corrector_model = optim.Adam(corrector_model.parameters(), lr=1e-3)
 
     batch_size = 512
-    epochs = 2000
+    epochs = 10
+    corrector_iterations = 1000
+    adjoint_iterations = 1000
     adjoint_model.train()
     print("[START TRAINING]")
     for epoch in range(epochs):
-        x0 = torch.randn(batch_size, 2, device=device)
-
-        loss = matcher.get_loss(adjoint_model, corrector_model, energy_fn, x0)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        if epoch % (epochs // 10) == 0:
-            print(f"Epoch: {epoch} | Loss: {loss.item():.4f}")
+        for iteration in range(adjoint_iterations):
+            x0 = torch.randn(batch_size, 2, device=device)
+            loss_adjoint_model = matcher.get_loss(adjoint_model, corrector_model, energy_fn, x0)
+            optimizer_adjoint_model.zero_grad()
+            loss_adjoint_model.backward()
+            optimizer_adjoint_model.step()
+            if iteration % max(adjoint_iterations // 2, 1) == 0:
+                print(f"Adjoint Model | Epoch: {epoch} | Training Iteration: {epoch * adjoint_iterations + iteration} | Loss: {loss_adjoint_model.item():.4f}")
+        for iteration in range(corrector_iterations):
+            x0 = torch.randn(batch_size, 2, device=device)
+            loss_corrector_model = matcher.get_corrector_loss(corrector_model, x0)
+            optimizer_corrector_model.zero_grad()
+            loss_corrector_model.backward()
+            optimizer_corrector_model.step()
+            if iteration % max(corrector_iterations // 2, 1) == 0:
+                print(f"Corrector Model | Epoch: {epoch} | Training Iteration: {epoch * adjoint_iterations + iteration} | Loss: {loss_corrector_model.item():.4f}")
+        if epoch % max(epochs // 10, 1) == 0:
+            print(f"Epoch: {epoch} | Adjoint Model Loss: {loss_adjoint_model.item():.4f} | Corrector Model Loss: {loss_corrector_model.item():.4f}")
     print("[END TRAINING]")
-    return adjoint_model, sde
+    return adjoint_model, corrector_model, sde
 
 @torch.no_grad()
 def sample_and_plot(adjoint_model, sde):
@@ -65,21 +77,23 @@ def sample_and_plot(adjoint_model, sde):
     adjoint_model.eval()
     steps = 100
     dt = 1.0 / steps
-    x = torch.randn(1000, 2, device=device)
+    x = torch.randn(1000, 2, device=device) * 2.0
     for step in range(steps):
         t = torch.full((x.shape[0], 1), step * dt, device=device)
         g_t = sde.diffusion(t)
-        learned_drift = (g_t ** 2) * adjoint_model(t, x)
+        base_drift = sde.drift(t, x)
+        control_drift = (g_t ** 2) * adjoint_model(t, x)
+        drift = base_drift + control_drift
         noise = torch.randn_like(x) * g_t * dt ** 0.5
-        x = x + learned_drift + noise
+        x = x + drift * dt + noise
     x_numpy = x.cpu().numpy()
     plt.scatter(x_numpy[:,0], x_numpy[:,1])
     plt.title("Generated Samples (4 Mode GMM)")
     plt.xlim(-6, 6)
     plt.ylim(-6, 6)
     plt.grid(True)
-    plt.savefig("test.png")
+    plt.savefig("test_vpsde3.png")
 
 if __name__ == "__main__":
-    model, sde = train_minimal_asbs()
+    model, corrector_model, sde = train_asbs()
     sample_and_plot(model, sde)
