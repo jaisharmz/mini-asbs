@@ -3,9 +3,10 @@ import torch.nn as nn
 from sde import BaseSDE
 
 class AdjointMatcher:
-    def __init__(self, sde: BaseSDE, steps=100):
+    def __init__(self, sde: BaseSDE, steps=100, center_noise=False):
         self.sde = sde
         self.steps = steps
+        self.center_noise = center_noise
     @torch.no_grad()
     def simulate(self, x0):
         dt = 1.0 / self.steps
@@ -13,7 +14,12 @@ class AdjointMatcher:
         for step in range(self.steps):
             t = torch.full((x0.shape[0], 1), step * dt, device=x0.device)
             drift = self.sde.drift(t, x)
-            diffusion = self.sde.diffusion(t) * dt ** 0.5 * torch.randn_like(x)
+            noise = torch.randn_like(x)
+            if self.center_noise:
+                noise = noise.view(-1, 4, 2)
+                noise = noise - noise.mean(dim=1, keepdim=True)
+                noise = noise.view(-1, 8)
+            diffusion = self.sde.diffusion(t) * dt ** 0.5 * noise
             x = x + drift * dt + diffusion
         return x
     def get_loss(self, adjoint_model, corrector_model, energy_fn, x0):
@@ -21,6 +27,9 @@ class AdjointMatcher:
         x1.requires_grad_(True)
         energy = energy_fn(x1)
         energy_grad = torch.autograd.grad(energy.sum(), x1)[0]
+        grad_norm = torch.linalg.vector_norm(energy_grad, dim=-1, keepdim=True)
+        clip_coeff = torch.clamp(100.0 / (grad_norm + 1e-6), max=1.0)
+        energy_grad = energy_grad * clip_coeff
 
         t1 = torch.ones(x0.shape[0], 1, device=x0.device)
         with torch.no_grad():
@@ -40,6 +49,10 @@ class AdjointMatcher:
         t = torch.rand(x0.shape[0], 1, device=x0.device)
         mean, std = self.sde.marginal_prob(t, x0)
         noise = torch.randn_like(x0)
+        if self.center_noise:
+            noise = noise.view(-1, 4, 2)
+            noise = noise - noise.mean(dim=1, keepdim=True)
+            noise = noise.view(-1, 8)
         xt = mean + std * noise
         target = -noise # / std
         pred = corrector_model(t, xt)
